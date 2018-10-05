@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python
 
 # HDnes pythonDUML
 # Thanks Hostile for the fireworks grepping all the fish.
@@ -21,7 +21,17 @@ from pathlib import Path
 from ftplib import FTP
 from serial.tools import list_ports
 
-def main():
+def main(args):
+    if (len(args) != 3):
+        print("Usage: {} ipAddress portNum".format(args[0]))
+        print("  RC typically is 192.168.42.2 8906")
+        return
+
+    ip = args[1]
+    portNum = int(args[2])
+    print("Connecting to {}:{}".format(ip, portNum))
+
+def old_main():
     platform_detection() 
     device_selection_prompt()
     if device != 4:
@@ -119,12 +129,10 @@ def configure_usbserial():
         sys.exit(0)
     return
 
-def configure_socket():
-	global s
-	TCP_IP = '192.168.1.1'
-	TCP_PORT = 19003
-	s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-	s.connect((TCP_IP, TCP_PORT))
+def configure_socket(ip = '192.168.1.1',port = 19003):
+    global s
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.connect((ip, port))
 
 def write_packet(data):
     ser.write(data)     # write a string
@@ -373,4 +381,4 @@ def calc_pkt55_hdr_checksum(seed, packet, plength):
     return chksum	
 	
 if __name__ == "__main__":
-    main()
+    main(sys.argv)
