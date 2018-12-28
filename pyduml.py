@@ -21,15 +21,86 @@ from pathlib import Path
 from ftplib import FTP
 from serial.tools import list_ports
 
+mode = None
+
+def printUsage():
+    print("Usage: pyduml.py [-d] serial [/dev/ttyACM0]")
+    print("       pyduml.py [-d] tcp ipAddress portNumber")
+
 def main(args):
-    if (len(args) != 3):
-        print("Usage: {} ipAddress portNum".format(args[0]))
-        print("  RC typically is 192.168.42.2 8906")
+    global mode
+
+    # Is debug mode arg set
+    for i in range(0, len(args)):
+        if (args[i] == '-d'):
+            global debugMode
+            debugMode = True
+
+            # Remove this arg from the list of args
+            args = args[0:i] + args[i+1:]
+
+            print("Debug Mode Enabled")
+            break
+
+    if (len(args) < 2):
+        printUsage()
         return
 
-    ip = args[1]
-    portNum = int(args[2])
-    print("Connecting to {}:{}".format(ip, portNum))
+    mode = args[1]
+    if ( (mode != "serial") and (mode != "tcp") ):
+        print("Mode: {} is invalid.  Must be tcp or serial".format(mode))
+        return
+
+    if (mode == "tcp"):
+        if ( len(args) < 4 ):
+            printUsage()
+            return
+
+        ipAddr = args[2]
+        portNum = int(args[3])
+
+        print("TCP Mode.  IP = {}, Port = {}".format(ipAddr, portNum))
+
+        # Do TCP connection stuff
+        configure_socket(ipAddr, portNum)
+
+    if (mode == "serial"):
+        if (len(args) > 2):
+            serialPort = args[2]
+        else:
+            serialPort = "/dev/ttyACM0"
+
+        print("Serial Mode.  Port = {}".format(serialPort))
+
+        # Do serial connection stuff
+        configure_serial(serialPort)
+
+    locations = { 'whoami': 0x00, 'camera': 0x01, 'mobile': 0x02, 'fc': 0x03,
+                  'gimbal': 0x04, 'centerb': 0x05, 'rc': 0x06, 'wifi': 0x07,
+		  'dm36x': 0x08, 'ofdm': 0x09, 'pc': 0x0a, 'battery': 0x0b,
+		  'esc': 0x0c, 'dm36x_gnd': 0x0d, 'osd': 0x0e, 'trans': 0x0f,
+		  'trans_g':0x10, 'single': 0x11, 'double': 0x12, 'fpga': 0x13,
+		  'fpga_g': 0x14, 'wifi_g': 0x1b, 'glass': 0x1c, 'broadcast': 0x1f
+		}
+
+    # I think this should be the target, maybe not even with the 0x20 or-ed with it
+    target = 0x20 | locations['rc']
+
+    # But this is what seems to work for everyone
+    target = 0x2d 
+
+    # This sent a get_temperature_info command, got a response of 3 bytes
+    # I think first byte maybe some kind of success / failure
+    # I think next two bytes are int16_t (I got 700, which i think means 70 deg C?)
+    send_duml_tcp(locations['pc'], target, 0x40, 0, 84, bytearray.fromhex(u'00'))
+
+    
+
+def start_test(source, target, testId, testParam):
+    cmdPayload = struct.pack('<IH', testId, len(testParam))
+    cmdPayload += testParam
+    
+    send_duml_tcp(source, target, 0x40, 0, 0xf4, cmdPayload)
 
 def old_main():
     platform_detection() 
@@ -131,8 +202,30 @@ def configure_usbserial():
 
 def configure_socket(ip = '192.168.1.1',port = 19003):
     global s
+    global debugMode
+
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     s.connect((ip, port))
+    
+    if (debugMode):
+        print("TCP connected")
+
+def configure_serial(comport):
+    try:
+        global ser
+        global debugMode
+
+        ser = serial.Serial(comport)
+        ser.baudrate = 115200
+
+        if (debugMode):
+            print("Serial connected")
+    except:
+        print("Error: Could not open communications port " + comport + ".\n")
+        sys.exit(0)
+    return
+
+
 
 def write_packet(data):
     ser.write(data)     # write a string
@@ -144,8 +237,10 @@ def write_packet(data):
         print("Sent DUML packet...\n")
     return
 
-def send_duml_tcp(socket, source, target, cmd_type, cmd_set, cmd_id, payload = None):
+def send_duml_tcp(source, target, cmd_type, cmd_set, cmd_id, payload = None):
     global sequence_number
+    global mode
+    global debugMode
     sequence_number = 0x34eb
     packet = bytearray.fromhex(u'55')
     length = 13
@@ -172,11 +267,18 @@ def send_duml_tcp(socket, source, target, cmd_type, cmd_set, cmd_id, payload = N
 
     crc = calc_checksum(packet, len(packet))
     packet += struct.pack('<H',crc)
-    socket.send(packet)
-    if len(sys.argv) > 2 and sys.argv[2] == "debugmode":
+    
+    if (mode == "tcp"):
+        global s
+        s.send(packet)
+    else:
+        global ser
+        ser.write(packet)
+    
+    if (debugMode):
         print(' '.join(format(x, '02x') for x in packet))
     else:
-        print("Sent DUML packet...\n")
+        print("Sent DUML packet via {}...\n".format(mode))
 
     sequence_number += 1
 
